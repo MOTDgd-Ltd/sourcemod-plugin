@@ -27,7 +27,7 @@
 
 #define STRING(%1) %1, sizeof(%1)
 
-#define PLUGIN_VERSION "2.5.4"
+#define PLUGIN_VERSION "2.5.5"
  
 // ====[ HANDLES | CVARS | VARIABLES ]===================================================
 new Handle:g_motdID;
@@ -427,7 +427,7 @@ public Action:ClosedMOTD(client, const String:command[], argc)
 	}
 	else
 	{
-        if (StrEqual(gameDir, "cstrike") || StrEqual(gameDir, "csgo") || StrEqual(gameDir, "csco") || StrEqual(gameDir, "insurgency") || StrEqual(gameDir, "nmrih"))
+        if (StrEqual(gameDir, "cstrike") || StrEqual(gameDir, "csgo") || StrEqual(gameDir, "csco") || StrEqual(gameDir, "insurgency") || StrEqual(gameDir, "brainbread2") || StrEqual(gameDir, "nmrih"))
             FakeClientCommand(client, "joingame");
         else if (StrEqual(gameDir, "nucleardawn") || StrEqual(gameDir, "dod"))
             ClientCommand(client, "changeteam");
