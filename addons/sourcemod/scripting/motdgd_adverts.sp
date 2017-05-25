@@ -27,7 +27,7 @@
 
 #define STRING(%1) %1, sizeof(%1)
 
-#define PLUGIN_VERSION "2.5.5"
+#define PLUGIN_VERSION "2.5.16"
  
 // ====[ HANDLES | CVARS | VARIABLES ]===================================================
 new Handle:g_motdID;
@@ -38,6 +38,7 @@ new Handle:g_Review;
 new Handle:g_forced;
 new Handle:g_autoClose;
 new Handle:g_ipOverride;
+new Handle:g_audioOnly;
 
 new String:gameDir[255];
 new String:g_serverIP[16];
@@ -50,6 +51,7 @@ new Handle:g_Whitelist = INVALID_HANDLE;
 new bool:VGUICaught[MAXPLAYERS+1];
 new bool:CanReview;
 new bool:LateLoad;
+new bool:g_playerMidgame[MAXPLAYERS+1];
 
 // ====[ PLUGIN | FORWARDS ]========================================================================
 public Plugin:myinfo =
@@ -96,7 +98,10 @@ public OnPluginStart()
 	g_ipOverride = CreateConVar("sm_motdgd_ip", "", "Your server IP. Use this if your server IP is not identified properly automatically.");
 	// Global Server Variables //
 	
-	if (!StrEqual(gameDir, "left4dead2") && !StrEqual(gameDir, "left4dead") && !StrEqual(gameDir, "csgo"))
+	g_audioOnly = CreateConVar("sm_motdgd_midgame_audio_only", "0", "Set to 1 if you only want audio ads mid-game. This doesn't affect the ad shown upon connection.");
+
+
+	if (!StrEqual(gameDir, "left4dead2") && !StrEqual(gameDir, "left4dead"))
 	{
 		HookEventEx("arena_win_panel", Event_End);
 		HookEventEx("cs_win_panel_round", Event_End);
@@ -264,12 +269,14 @@ public OnClientPutInServer(client)
 	// Load the advertisement via conventional means
 	if (StrEqual(gameDir, "left4dead2") && GetConVarBool(g_OnConnect))
 	{
+		g_playerMidgame[client]=false;
 		CreateTimer(0.1, PreMotdTimer, GetClientUserId(client));
 	}
 }
 
 public OnMapStart() {
 
+	SetConVarBool(FindConVar("sv_disable_motd"), false);
 	LoadWhitelist();
 }
 
@@ -311,6 +318,7 @@ public Action:Event_End(Handle:event, const String:name[], bool:dontBroadcast)
 	if (IsValidClient(client) && CanReview && GetTime() - g_lastView[client] >= GetConVarFloat(g_Review) * 60)
 	{
 		g_lastView[client] = GetTime();
+		g_playerMidgame[client]=true;
 		CreateTimer(0.1, PreMotdTimer, GetClientUserId(client));
 	}
 
@@ -340,6 +348,7 @@ public Action:Event_Start(Handle:event, const String:name[], bool:dontBroadcast)
 	if (IsValidClient(client) && CanReview && GetTime() - g_lastView[client] >= GetConVarFloat(g_Review) * 60)
 	{
 		g_lastView[client] = GetTime();
+		g_playerMidgame[client]=true;
 		CreateTimer(0.1, PreMotdTimer, GetClientUserId(client));
 	}
 
@@ -368,6 +377,7 @@ public Action:CheckPlayerDeath(Handle:timer, any:userid)
 	if (CanReview && GetTime() - g_lastView[client] >= GetConVarFloat(g_Review) * 60)
 	{
 		g_lastView[client] = GetTime();
+		g_playerMidgame[client]=true;
 		CreateTimer(0.1, PreMotdTimer, GetClientUserId(client));
 	}
 	
@@ -378,8 +388,10 @@ public Action:Event_PlayerTransitioned(Handle:event, const String:name[], bool:d
 {
 	new client = GetClientOfUserId(GetEventInt(event, "userid"));
 
-	if (IsValidClient(client) && GetConVarBool(g_OnConnect))
+	if (IsValidClient(client) && GetConVarBool(g_OnConnect)) {
+		g_playerMidgame[client]=true;
 		CreateTimer(0.1, PreMotdTimer, GetClientUserId(client));
+	}
 
 	return Plugin_Continue;
 }
@@ -397,6 +409,7 @@ public Action:OnVGUIMenu(UserMsg:msg_id, Handle:bf, const players[], playersNum,
 	
 	g_lastView[client] = GetTime();
 	
+	g_playerMidgame[client]=false;
 	CreateTimer(0.1, PreMotdTimer, GetClientUserId(client));
 	
 	return Plugin_Handled;
@@ -446,17 +459,19 @@ public Action:PreMotdTimer(Handle:timer, any:userid)
 		return Plugin_Stop;
 	
 	decl String:url[255];
-	decl String:steamid[255];
+	new String:steamid[255]="NULL";
 	decl String:name[MAX_NAME_LENGTH];
 	decl String:name_encoded[MAX_NAME_LENGTH*2];
 	GetClientName(client, name, sizeof(name));
 	urlencode(name, name_encoded, sizeof(name_encoded));
 
-	if (GetClientAuthId(client, AuthId_Steam2, steamid, sizeof(steamid)))
-		Format(url, sizeof(url), "http://motd.motdgd.com/?user=%d&ip=%s&pt=%d&v=%s&st=%s&gm=%s&name=%s", GetConVarInt(g_motdID), g_serverIP, g_serverPort, PLUGIN_VERSION, steamid, gameDir, name_encoded);
-	else
-		Format(url, sizeof(url), "http://motd.motdgd.com/?user=%d&ip=%s&pt=%d&v=%s&st=NULL&gm=%s&name=%s", GetConVarInt(g_motdID), g_serverIP, g_serverPort, PLUGIN_VERSION, gameDir, name_encoded);
+	GetClientAuthId(client, AuthId_Steam2, steamid, sizeof(steamid));
+	Format(url, sizeof(url), "http://motd.motdgd.com/?user=%d&ip=%s&pt=%d&v=%s&st=%s&gm=%s&name=%s", GetConVarInt(g_motdID), g_serverIP, g_serverPort, PLUGIN_VERSION, steamid, gameDir, name_encoded);
 	
+	if(g_playerMidgame[client]) {
+		Format(url, sizeof(url), "%s&midgame=1&audio=%d", url, GetConVarInt(g_audioOnly));
+	}
+
 	if(FindStringInArray(g_Whitelist, steamid[8])!=-1) {
 		return Plugin_Stop;
 	}
