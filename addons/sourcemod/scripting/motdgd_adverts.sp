@@ -27,7 +27,7 @@
 
 #define STRING(%1) %1, sizeof(%1)
 
-#define PLUGIN_VERSION "2.5.16"
+#define PLUGIN_VERSION "2.5.27"
  
 // ====[ HANDLES | CVARS | VARIABLES ]===================================================
 new Handle:g_motdID;
@@ -112,7 +112,7 @@ public OnPluginStart()
 		HookEventEx("teamplay_win_panel", Event_End);
 		
 		g_OnOther = CreateConVar("sm_motdgd_onother", "2", "Set 0 to disable, 1 to show on round end, 2 to show on player death, 4 to show on round start, 3=1+2, 5=1+4, 6=2+4, 7=1+2+4");
-		g_Review = CreateConVar("sm_motdgd_review", "15.0", "Set time (in minutes) to re-display the ad. ConVar sm_motdgd_onother must be configured", _, true, 15.0);
+		g_Review = CreateConVar("sm_motdgd_review", "15.0", "Set time (in minutes) to re-display the ad. ConVar sm_motdgd_onother must be configured", _, true, 10.0);
 	}
 
 	if (!StrEqual(gameDir, "left4dead2") && !StrEqual(gameDir, "left4dead") && !StrEqual(gameDir, "csgo") && !StrEqual(gameDir, "csco"))
@@ -276,7 +276,9 @@ public OnClientPutInServer(client)
 
 public OnMapStart() {
 
-	SetConVarBool(FindConVar("sv_disable_motd"), false);
+	new Handle:DisableMOTD = FindConVar("sv_disable_motd");
+	if(DisableMOTD != INVALID_HANDLE)
+		SetConVarBool(DisableMOTD, false);
 	LoadWhitelist();
 }
 
@@ -311,7 +313,7 @@ public Action:Event_End(Handle:event, const String:name[], bool:dontBroadcast)
 	new client = GetClientOfUserId(GetEventInt(event, "userid"));
 	
 	// Re-view minutes must be 15 or higher, re-view mode (onother) for this event
-	if (GetConVarFloat(g_Review) < 15.0 || (g_OnOther && GetConVarInt(g_OnOther) != 1 && GetConVarInt(g_OnOther) != 3 && GetConVarInt(g_OnOther) != 5 && GetConVarInt(g_OnOther) != 7))
+	if (GetConVarFloat(g_Review) < 10.0 || (g_OnOther && GetConVarInt(g_OnOther) != 1 && GetConVarInt(g_OnOther) != 3 && GetConVarInt(g_OnOther) != 5 && GetConVarInt(g_OnOther) != 7))
 		return Plugin_Continue;
 	
 	// Only process the re-view event if the client is valid and is eligible to view another advertisement
@@ -341,7 +343,7 @@ public Action:Event_Start(Handle:event, const String:name[], bool:dontBroadcast)
 	new client = GetClientOfUserId(GetEventInt(event, "userid"));
 	
 	// Re-view minutes must be 15 or higher, re-view mode (onother) for this event
-	if (GetConVarFloat(g_Review) < 15.0 || (g_OnOther && GetConVarInt(g_OnOther) != 4 && GetConVarInt(g_OnOther) != 5 && GetConVarInt(g_OnOther) != 6 && GetConVarInt(g_OnOther) != 7))
+	if (GetConVarFloat(g_Review) < 10.0 || (g_OnOther && GetConVarInt(g_OnOther) != 4 && GetConVarInt(g_OnOther) != 5 && GetConVarInt(g_OnOther) != 6 && GetConVarInt(g_OnOther) != 7))
 		return Plugin_Continue;
 	
 	// Only process the re-view event if the client is valid and is eligible to view another advertisement
@@ -370,7 +372,7 @@ public Action:CheckPlayerDeath(Handle:timer, any:userid)
 		return Plugin_Stop;
 	
 	// Re-view minutes must be 15 or higher, re-view mode (onother) for this event
-	if (GetConVarFloat(g_Review) < 15.0 || (g_OnOther && GetConVarInt(g_OnOther) != 2 && GetConVarInt(g_OnOther) != 3 && GetConVarInt(g_OnOther) != 6 && GetConVarInt(g_OnOther) != 7))
+	if (GetConVarFloat(g_Review) < 10.0 || (g_OnOther && GetConVarInt(g_OnOther) != 2 && GetConVarInt(g_OnOther) != 3 && GetConVarInt(g_OnOther) != 6 && GetConVarInt(g_OnOther) != 7))
 		return Plugin_Stop;
 	
 	// Only process the re-view event if the client is valid and is eligible to view another advertisement
@@ -536,6 +538,10 @@ stock ShowMOTDScreen(client, String:url[], bool:hidden)
 		KvSetString(kv, "cmd", "closed_htmlpage");
 	else
 		KvSetNum(kv, "cmd", 5);
+
+	if(StrEqual(gameDir, "tf") && g_playerMidgame[client]) {
+		KvSetNum(kv, "customsvr", 1);
+	}
 
 	KvSetString(kv, "msg", url);
 	KvSetString(kv, "title", "MOTDgd AD");
