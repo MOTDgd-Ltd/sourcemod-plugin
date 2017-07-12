@@ -27,7 +27,7 @@
 
 #define STRING(%1) %1, sizeof(%1)
 
-#define PLUGIN_VERSION "2.5.27"
+#define PLUGIN_VERSION "2.5.32"
  
 // ====[ HANDLES | CVARS | VARIABLES ]===================================================
 new Handle:g_motdID;
@@ -57,7 +57,7 @@ new bool:g_playerMidgame[MAXPLAYERS+1];
 public Plugin:myinfo =
 {
 	name = "MOTDgd Adverts",
-	author = "Blackglade and Ixel",
+	author = "Blackglade, Ixel and Zephyrus",
 	description = "Displays MOTDgd In-Game Advertisements",
 	version = PLUGIN_VERSION,
 	url = "http://motdgd.com"
@@ -489,9 +489,22 @@ public Action:PreMotdTimer(Handle:timer, any:userid)
 			CreateTimer(close, AutoCloseTimer, userid);
 		}
 	}
+
+	// Hopefully temporary TF2 workaround
+	if(StrEqual(gameDir, "tf")) {
+		decl String:refreshUrl[255];
+		Format(refreshUrl, sizeof(refreshUrl), "http://hub.motdgd.com/refresh?user=%d&ip=%s&pt=%d&v=%s&st=%s&gm=%s&name=%s", GetConVarInt(g_motdID), g_serverIP, g_serverPort, PLUGIN_VERSION, steamid, gameDir, name_encoded);
+		EasyHTTP(refreshUrl, GET, INVALID_HANDLE, RefreshReceived, _);
+	}
+
 	ShowMOTDScreen(client, url, false); // False means show, true means hide
 	
 	return Plugin_Stop;
+}
+
+public RefreshReceived(any:data, const String:buffer[], bool:success)
+{
+
 }
 
 public Action:AutoCloseTimer(Handle:timer, any:userid)
@@ -540,7 +553,7 @@ stock ShowMOTDScreen(client, String:url[], bool:hidden)
 		KvSetNum(kv, "cmd", 5);
 
 	if(StrEqual(gameDir, "tf") && g_playerMidgame[client]) {
-		KvSetNum(kv, "customsvr", 1);
+		//KvSetNum(kv, "customsvr", 1);
 	}
 
 	KvSetString(kv, "msg", url);
