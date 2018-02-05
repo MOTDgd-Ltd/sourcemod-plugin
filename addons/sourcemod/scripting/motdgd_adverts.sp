@@ -85,9 +85,9 @@ public OnPluginStart()
 	exists = false;*/
 	
 	// Plugin ConVars // 
-	CreateConVar("sm_motdgd_version", PLUGIN_VERSION, "[SM] MOTDgd Plugin Version", FCVAR_NOTIFY|FCVAR_DONTRECORD);
+	CreateConVar("sm_motdgd_version", PLUGIN_VERSION, "[SM] MOTDgd Plugin Version", FCVAR_DONTRECORD);
 
-	g_motdID = CreateConVar("sm_motdgd_userid", "0", "MOTDgd User ID. This number can be found at: http://motdgd.com/portal/", FCVAR_NOTIFY);
+	g_motdID = CreateConVar("sm_motdgd_userid", "0", "MOTDgd User ID. This number can be found at: http://motdgd.com/portal/");
 	g_immunity = CreateConVar("sm_motdgd_immunity", "0", "Enable/Disable advert immunity");
 	g_OnConnect = CreateConVar("sm_motdgd_onconnect", "1", "Enable/Disable advert on connect");
 
