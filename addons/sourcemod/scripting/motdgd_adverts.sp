@@ -46,8 +46,11 @@ new Handle:g_RewardNoAd;
 new Handle:g_RewardMode;
 new Handle:g_RewardMsg;
 new Handle:g_NoRewardMsg;
+new Handle:g_NoVideoMsg;
+new Handle:g_RewardChance;
 new Handle:g_Cooldown;
 new Handle:g_CooldownMsg;
+new Handle:g_RewardEvents;
 
 new String:gameDir[255];
 new String:g_serverIP[16];
@@ -84,6 +87,7 @@ new Handle:handlers = INVALID_HANDLE;
 new Handle:rewards = INVALID_HANDLE;
 new Handle:rewardWeights = INVALID_HANDLE;
 new totalWeight = 0;
+new shouldReward[MAXPLAYERS+1];
 
 // ====[ PLUGIN | FORWARDS ]========================================================================
 public Plugin:myinfo =
@@ -97,6 +101,8 @@ public Plugin:myinfo =
 
 public OnPluginStart()
 {
+	IdentifyGame();
+
 	if(g_bL4D || g_bL4D2 || g_bND) {
 
 	}
@@ -154,10 +160,13 @@ public OnPluginStart()
 
 	g_RewardNoAd = CreateConVar("sm_motdgd_reward_on_no_ad", "0", "Give a reward even when a video is unavailable");
 	g_RewardMode = CreateConVar("sm_motdgd_reward_mode", "2", "0=disabled 1=all 2=random reward with equal probabilities 3=random reward with weighted probabilities");
+	g_RewardChance = CreateConVar("sm_motdgd_reward_chance", "1.0", "Chance of receiving a reward, 1.0 = 100%");
 	g_RewardMsg = CreateConVar("sm_motdgd_reward_message", "Thanks for supporting us! Here's your reward!", "Message to be displayed when an ad was shown");
-	g_NoRewardMsg = CreateConVar("sm_motdgd_no_reward_message", "Sorry, no video was available. Try again later!", "Message to be displayed when no ad was shown");
+	g_NoVideoMsg = CreateConVar("sm_motdgd_no_reward_message", "Sorry, no video was available. Try again later!", "Message to be displayed when no ad was shown");
+	g_NoRewardMsg = CreateConVar("sm_motdgd_no_reward_message", "There's no reward for you this time, try again later!", "Message to be displayed when no reward was given");
 	g_Cooldown = CreateConVar("sm_motdgd_cooldown", "1.0", "Minimum time (in minutes) between rewards.");
 	g_CooldownMsg = CreateConVar("sm_motdgd_cooldown_message", "You have to wait another {minutes} minute(s) before you can receive another reward.", "Message to be displayed when no ad was shown");
+	g_RewardEvents = CreateConVar("sm_motdgd_reward_events", "0", "Should event based ads (such as joining the game) be rewarded");
 	// Plugin ConVars //
 
 	handlers = CreateTrie();
@@ -337,8 +346,10 @@ public bool:OnClientConnect(client, String:rejectmsg[], maxlen)
 	VGUICaught[client] = false;
 	g_shownTeamVGUI[client] = false;
 	g_lastView[client] = 0;
+	g_lastReward[client] = 0;
+	shouldReward[client] = 0;
 	
-	if (!StrEqual(gameDir, "left4dead2") && !StrEqual(gameDir, "left4dead"))
+	if (!StrEqual(gameDir, "left4dead2") && !StrEqual(gameDir, "left4dead") && !StrEqual(gameDir, "csgo"))
 		CanReview = true;
 	
 	return true;
@@ -390,15 +401,23 @@ public Action:Command_Ad(client, args) {
 
 	if(client <= 0) return Plugin_Continue;
 
-	if (IsValidClient(client) && CanReview && GetTime() - g_lastView[client] >= GetConVarFloat(g_Review) * 60)
+	shouldReward[client] = GetTime();
+
+	new time1 = !CanReview ? 0 : RoundToCeil((GetConVarFloat(g_Review) * 60 - (GetTime() - g_lastView[client]))/60);
+	new time2 = RoundToCeil((GetConVarFloat(g_Cooldown) * 60 - (GetTime() - g_lastReward[client]))/60);
+
+	if (time1 <= 0 && time2 <= 0)
 	{
-		g_lastView[client] = GetTime();
-		g_playerMidgame[client]=true;
-		CreateTimer(0.1, PreMotdTimer, GetClientUserId(client));
+		if(!g_bCSGO) {
+			g_lastView[client] = GetTime();
+			g_playerMidgame[client]=true;
+			CreateTimer(0.1, PreMotdTimer, GetClientUserId(client));
+		} else {
+			Chat(client, "To watch an ad, press the SERVER WEBSITE button on the scoreboard.");
+		}
 	} else {
 
-		new time1 = RoundToCeil((GetConVarFloat(g_Review) * 60 - (GetTime() - g_lastView[client]))/60);
-		new time2 = RoundToCeil((GetConVarFloat(g_Cooldown) * 60 - (GetTime() - g_lastReward[client]))/60);
+		
 		new String:msg[256];
 		new String:minutes[11];
 		GetConVarString(g_CooldownMsg, STRING(msg));
@@ -870,7 +889,8 @@ public handleWebsocket(Handle:socket, String:msg[]) {
 
 			case 8: {
 				PrintToServer("## Remote HUB closed connection");
-				SocketDisconnect(socket);
+				CloseHandle(socket);
+				socket = INVALID_HANDLE;
 			}
 
 			default: {
@@ -1086,10 +1106,21 @@ public RewardPlayer(client) {
 	new mode = GetConVarInt(g_RewardMode);
 	if(mode == 0 || GetArraySize(rewards) == 0) return;
 
+	if(GetConVarInt(g_RewardEvents) != 1 && strcmp(gameDir, "csgo") != 0 && shouldReward[client]+90 < GetTime()) {
+		return;
+	}
+
+	new String:msg[256];
+	if(GetRandomFloat() >= GetConVarFloat(g_RewardChance)) {
+
+		GetConVarString(g_NoRewardMsg, STRING(msg));
+		Chat(client, "%s", msg);
+		return;
+	}
+
 	new time = RoundToCeil((GetConVarFloat(g_Cooldown) * 60 - (GetTime() - g_lastReward[client]))/60);
 	if(time > 0) {
-
-		new String:msg[256];
+		
 		new String:minutes[11];
 		GetConVarString(g_CooldownMsg, STRING(msg));
 		IntToString(time, STRING(minutes));
@@ -1130,8 +1161,12 @@ public NoRewardPlayer(client) {
 	new mode = GetConVarInt(g_RewardMode);
 	if(mode == 0 || GetArraySize(rewards) == 0) return;
 
+	if(strcmp(gameDir, "csgo") != 0 && shouldReward[client]+120 < GetTime()) {
+		return;
+	}
+
 	new String:message[256];
-	GetConVarString(g_NoRewardMsg, STRING(message));
+	GetConVarString(g_NoVideoMsg, STRING(message));
 	ReplacePlaceholders(client, STRING(message));
 	Chat(client, "%s", message);
 }
