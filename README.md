@@ -12,8 +12,15 @@
 
 To set up rewards, you can use the command "sm_motdgd_add_reward". For example:
 
-sm_motdgd_add_reward "sm_slay #{userid}"
+`sm_motdgd_add_reward "sm_slay #{userid}"`
 
 For weighted probability mode, you can set the weight of the reward with the optional second parameter:
 
-sm_motdgd_add_reward "sm_slay #{userid}" 10
+`sm_motdgd_add_reward "sm_slay #{userid}" 10`
+
+Available placeholders are:
+- {client} - Client ID of the player
+- {userid} - User ID of the player
+- {name} - Name of the player surrounded by double quotes
+- {steamid} - Steam ID of the player in the format STEAM_X:Y:Z
+- {steamid64} - 64-bit Steam ID (Community ID) of the player
