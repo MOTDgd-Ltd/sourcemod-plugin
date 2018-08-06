@@ -30,7 +30,7 @@
 
 #define STRING(%1) %1, sizeof(%1)
 
-#define PLUGIN_VERSION "2.5.32"
+#define PLUGIN_VERSION "3.0.0"
  
 // ====[ HANDLES | CVARS | VARIABLES ]===================================================
 new Handle:g_motdID;
@@ -125,7 +125,7 @@ public OnPluginStart()
 	// Plugin ConVars // 
 	CreateConVar("sm_motdgd_version", PLUGIN_VERSION, "[SM] MOTDgd Plugin Version", FCVAR_DONTRECORD);
 
-	g_motdID = CreateConVar("sm_motdgd_userid", "0", "MOTDgd User ID. This number can be found at: http://motdgd.com/portal/");
+	g_motdID = CreateConVar("sm_motdgd_userid", "0", "MOTDgd User ID. This number can be found at: https://portal.motdgd.com");
 	g_immunity = CreateConVar("sm_motdgd_immunity", "0", "Enable/Disable advert immunity");
 	g_OnConnect = CreateConVar("sm_motdgd_onconnect", "1", "Enable/Disable advert on connect");
 
@@ -162,7 +162,7 @@ public OnPluginStart()
 	g_RewardMode = CreateConVar("sm_motdgd_reward_mode", "2", "0=disabled 1=all 2=random reward with equal probabilities 3=random reward with weighted probabilities");
 	g_RewardChance = CreateConVar("sm_motdgd_reward_chance", "1.0", "Chance of receiving a reward, 1.0 = 100%");
 	g_RewardMsg = CreateConVar("sm_motdgd_reward_message", "Thanks for supporting us! Here's your reward!", "Message to be displayed when an ad was shown");
-	g_NoVideoMsg = CreateConVar("sm_motdgd_no_reward_message", "Sorry, no video was available. Try again later!", "Message to be displayed when no ad was shown");
+	g_NoVideoMsg = CreateConVar("sm_motdgd_no_video_message", "Sorry, no video was available. Try again later!", "Message to be displayed when no ad was shown");
 	g_NoRewardMsg = CreateConVar("sm_motdgd_no_reward_message", "There's no reward for you this time, try again later!", "Message to be displayed when no reward was given");
 	g_Cooldown = CreateConVar("sm_motdgd_cooldown", "1.0", "Minimum time (in minutes) between rewards.");
 	g_CooldownMsg = CreateConVar("sm_motdgd_cooldown_message", "You have to wait another {minutes} minute(s) before you can receive another reward.", "Message to be displayed when no ad was shown");
