@@ -22,8 +22,11 @@
 // ====[ INCLUDES | DEFINES ]============================================================
 #pragma semicolon 1
 #include <sourcemod>
+#define CHAT_TAG ""
 #include <zephstocks>
 #include <EasyHTTP>
+#include <EasyJSON>
+#include <motdgd>
 
 #define STRING(%1) %1, sizeof(%1)
 
@@ -39,6 +42,12 @@ new Handle:g_forced;
 new Handle:g_autoClose;
 new Handle:g_ipOverride;
 new Handle:g_audioOnly;
+new Handle:g_RewardNoAd;
+new Handle:g_RewardMode;
+new Handle:g_RewardMsg;
+new Handle:g_NoRewardMsg;
+new Handle:g_Cooldown;
+new Handle:g_CooldownMsg;
 
 new String:gameDir[255];
 new String:g_serverIP[16];
@@ -46,12 +55,35 @@ new String:g_serverIP[16];
 new g_serverPort;
 new g_shownTeamVGUI[MAXPLAYERS+1] = { false, ... };
 new g_lastView[MAXPLAYERS+1];
+new g_lastReward[MAXPLAYERS+1];
 new Handle:g_Whitelist = INVALID_HANDLE;
 
 new bool:VGUICaught[MAXPLAYERS+1];
 new bool:CanReview;
 new bool:LateLoad;
 new bool:g_playerMidgame[MAXPLAYERS+1];
+
+
+enum HUBState {
+	k_Closed = 0,
+	k_Connected = 1,
+	k_Upgraded = 2,
+	k_LoggedIn = 3
+}
+
+new Handle:hub = INVALID_HANDLE;
+new String:sid[64];
+new HUBState:hubState = k_Closed;
+new ServerID = -1;
+new pingInterval = -1;
+new pingTimeout = -1;
+new Handle:pingTimer = INVALID_HANDLE;
+new Handle:timeoutTimer = INVALID_HANDLE;
+
+new Handle:handlers = INVALID_HANDLE;
+new Handle:rewards = INVALID_HANDLE;
+new Handle:rewardWeights = INVALID_HANDLE;
+new totalWeight = 0;
 
 // ====[ PLUGIN | FORWARDS ]========================================================================
 public Plugin:myinfo =
@@ -119,7 +151,20 @@ public OnPluginStart()
 	{
 		g_forced = CreateConVar("sm_motdgd_forced_duration", "5", "Number of seconds to force an ad view for (except in CS:GO, L4D, L4D2)");
 	}
+
+	g_RewardNoAd = CreateConVar("sm_motdgd_reward_on_no_ad", "0", "Give a reward even when a video is unavailable");
+	g_RewardMode = CreateConVar("sm_motdgd_reward_mode", "2", "0=disabled 1=all 2=random reward with equal probabilities 3=random reward with weighted probabilities");
+	g_RewardMsg = CreateConVar("sm_motdgd_reward_message", "Thanks for supporting us! Here's your reward!", "Message to be displayed when an ad was shown");
+	g_NoRewardMsg = CreateConVar("sm_motdgd_no_reward_message", "Sorry, no video was available. Try again later!", "Message to be displayed when no ad was shown");
+	g_Cooldown = CreateConVar("sm_motdgd_cooldown", "1.0", "Minimum time (in minutes) between rewards.");
+	g_CooldownMsg = CreateConVar("sm_motdgd_cooldown_message", "You have to wait another {minutes} minute(s) before you can receive another reward.", "Message to be displayed when no ad was shown");
 	// Plugin ConVars //
+
+	handlers = CreateTrie();
+	rewards = CreateArray(512);
+	rewardWeights = CreateArray();
+	RegServerCmd("sm_motdgd_add_reward", Command_AddReward);
+	RegConsoleCmd("sm_ad", Command_Ad);
 
 	// MOTDgd MOTD Stuff //
 	new UserMsg:datVGUIMenu = GetUserMessageId("VGUIMenu");
@@ -144,6 +189,14 @@ public OnPluginStart()
 	}
 
 	GetIP();
+
+	connectHub();
+}
+
+public OnPluginEnd() {
+	if(hub != INVALID_HANDLE) {
+		SocketDisconnect(hub);
+	}
 }
 
 public OnConfigsExecuted() {
@@ -163,7 +216,7 @@ public SteamWorks_SteamServersConnected()
 
 public bool:IsLocal(ip)
 {
-	if(167772160 <= ip <= 184549375 ||
+	if(ip == 0 || 167772160 <= ip <= 184549375 ||
 		2886729728 <= ip <= 2887778303 ||
 		3232235520 <= ip <= 3232301055)	
 		return true;
@@ -249,6 +302,33 @@ public IPReceived(any:data, const String:buffer[], bool:success)
 public APLRes:AskPluginLoad2(Handle:myself, bool:late, String:error[], err_max)
 {
 	EasyHTTP_MarkNatives();
+	CreateNative("MOTDgd_AddRewardHandler", Native_AddRewardHandler);
+	CreateNative("MOTDgd_RemoveRewardHandler", Native_RemoveRewardHandler);
+	return APLRes_Success;
+}
+
+public Native_AddRewardHandler(Handle:plugin, numParams)
+{
+	new String:id[32];
+	GetNativeString(1, id, sizeof(id));
+	new Function:cb = GetNativeFunction(2);
+	new Handle:data = CreateDataPack();
+	WritePackCell(data, plugin);
+	WritePackFunction(data, cb);
+	ResetPack(data);
+	SetTrieValue(handlers, id, data);
+	return true;
+}
+
+public Native_RemoveRewardHandler(Handle:plugin, numParams)
+{
+	new String:id[32];
+	GetNativeString(1, id, sizeof(id));
+	new Handle:data;
+	GetTrieValue(handlers, id, data);
+	CloseHandle(data);
+	RemoveFromTrie(handlers, id);
+	return true;
 }
 
 public bool:OnClientConnect(client, String:rejectmsg[], maxlen)
@@ -280,6 +360,55 @@ public OnMapStart() {
 	if(DisableMOTD != INVALID_HANDLE)
 		SetConVarBool(DisableMOTD, false);
 	LoadWhitelist();
+}
+
+public Action:Command_AddReward(args) {
+
+	if(args < 1) {
+		PrintToServer("Usage: sm_motdgd_add_reward <command> [weight]");
+		return Plugin_Handled;
+	}
+
+	new weight = 1;
+	new String:command[512];
+
+	if(args > 1) {
+		GetCmdArg(2, command, sizeof(command));
+		weight = StringToInt(command);
+	}
+	PushArrayCell(rewardWeights, weight);
+	totalWeight += weight;
+
+	GetCmdArg(1, command, sizeof(command));
+	TrimString(command);
+	PushArrayString(rewards, command);
+
+	return Plugin_Handled;
+}
+
+public Action:Command_Ad(client, args) {
+
+	if(client <= 0) return Plugin_Continue;
+
+	if (IsValidClient(client) && CanReview && GetTime() - g_lastView[client] >= GetConVarFloat(g_Review) * 60)
+	{
+		g_lastView[client] = GetTime();
+		g_playerMidgame[client]=true;
+		CreateTimer(0.1, PreMotdTimer, GetClientUserId(client));
+	} else {
+
+		new time1 = RoundToCeil((GetConVarFloat(g_Review) * 60 - (GetTime() - g_lastView[client]))/60);
+		new time2 = RoundToCeil((GetConVarFloat(g_Cooldown) * 60 - (GetTime() - g_lastReward[client]))/60);
+		new String:msg[256];
+		new String:minutes[11];
+		GetConVarString(g_CooldownMsg, STRING(msg));
+		IntToString(time1 > time2 ? time1 : time2, STRING(minutes));
+		ReplaceString(STRING(msg), "{minutes}", minutes);
+
+		Chat(client, "%s", msg);
+	}
+
+	return Plugin_Handled;
 }
 
 // ====[ FUNCTIONS ]=====================================================================
@@ -468,7 +597,7 @@ public Action:PreMotdTimer(Handle:timer, any:userid)
 	urlencode(name, name_encoded, sizeof(name_encoded));
 
 	GetClientAuthId(client, AuthId_Steam2, steamid, sizeof(steamid));
-	Format(url, sizeof(url), "http://motd.motdgd.com/?user=%d&ip=%s&pt=%d&v=%s&st=%s&gm=%s&name=%s", GetConVarInt(g_motdID), g_serverIP, g_serverPort, PLUGIN_VERSION, steamid, gameDir, name_encoded);
+	Format(url, sizeof(url), "http://motd.motdgd.com/?user=%d&ip=%s&pt=%d&v=%s&st=%s&gm=%s&name=%s&srv_id=%d&clt_user=%s", GetConVarInt(g_motdID), g_serverIP, g_serverPort, PLUGIN_VERSION, steamid, gameDir, name_encoded, ServerID, steamid);
 	
 	if(g_playerMidgame[client]) {
 		Format(url, sizeof(url), "%s&midgame=1&audio=%d", url, GetConVarInt(g_audioOnly));
@@ -623,3 +752,438 @@ stock urlencode(const String:sString[], String:sResult[], len)
 		}
 	}
 }  
+
+
+// Socket.io
+
+new String:yeast_alphabet[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-_";
+const yeast_length = 64;
+new yeast_seed = 0;
+new String:yeast_prev[256];
+
+public yeast_encode(num, String:out[], maxlen) {
+
+	new i = num <= 0 ? 0 : RoundToFloor(Logarithm(float(num), float(yeast_length)));
+	do {
+		out[i--] = yeast_alphabet[num % yeast_length];
+		num = num / yeast_length;
+	} while (num > 0);
+}
+
+public yeast(String:out[], maxlen) {
+
+	new String:now[128];
+	new String:seedpp[128];
+
+	yeast_encode(GetTime(), now, sizeof(now));
+
+	if (strcmp(now, yeast_prev)!=0) {
+		yeast_seed = 0;
+		strcopy(yeast_prev, sizeof(yeast_prev), now);
+		strcopy(out, maxlen, now);
+		return;
+	}
+	
+	yeast_encode(yeast_seed++, seedpp, sizeof(seedpp));
+	Format(out, maxlen, "%s.%s", now, seedpp);
+}
+
+Action:connectHub(Handle:timer=INVALID_HANDLE)
+{
+	hub = SocketCreate(SOCKET_TCP, OnSocketError);
+	SocketConnect(hub, OnSocketConnected, OnSocketReceive, OnSocketDisconnected, "hub.motdgd.com", 80);
+}
+
+public OnSocketConnected(Handle:socket, any:arg) {
+
+	hubState = k_Connected;
+
+	// socket is connected, send the http request
+	PrintToServer("## Socket connected");
+	decl String:requestStr[512];
+    
+	new String:cb[128];
+	yeast(cb, sizeof(cb));
+	Format(requestStr, sizeof(requestStr), "GET /%s%s HTTP/1.1\r\nHost: %s\r\n\r\n", "socket.io/?EIO=3&transport=polling&t=", cb, "hub.motdgd.com");
+	SocketSend(socket, requestStr);
+}
+
+public OnSocketError(Handle s, int errorType, int errorNum, any arg) {
+	PrintToServer("## Socket error: %d %d", errorType, errorNum);
+}
+
+public OnSocketDisconnected(Handle s, any data) {
+	PrintToServer("## Socket disconnected.");
+	hub = INVALID_HANDLE;
+	hubState = k_Closed;
+	if(pingTimer != INVALID_HANDLE) {
+		KillTimer(pingTimer);
+		pingTimer = INVALID_HANDLE;
+	}
+
+	if(timeoutTimer != INVALID_HANDLE) {
+		KillTimer(timeoutTimer);
+		timeoutTimer = INVALID_HANDLE;
+	}
+
+	CreateTimer(0.1, connectHub);
+}
+
+public OnSocketReceive(Handle:socket, String:receiveData[], const dataSize, any:hFile)
+{
+	if(hubState == k_Connected && StrContains(receiveData, "HTTP/1.1 200 OK", true) != -1)
+	{
+		new body = StrContains(receiveData, "\r\n\r\n")+4;
+		new packet_length = StringToInt(receiveData[body]);
+
+		new String:msg[128];
+		strcopy(msg, sizeof(msg) > packet_length+1 ? packet_length+1 : sizeof(msg), receiveData[body+StrContains(receiveData[body], ":")+1]);
+
+		handleEngineIO(socket, msg);
+	}
+	else if(hubState == k_Connected && StrContains(receiveData, "HTTP/1.1 101 Switching Protocols", true) == 0)
+	{
+		PrintToServer("## Started switching protocols");
+		sendRawMessage(socket, "2probe");
+
+	} else {
+
+		handleWebsocket(socket, receiveData);
+	}
+}
+
+public handleWebsocket(Handle:socket, String:msg[]) {
+
+	new FIN = (msg[0] & 0b10000000) >> 7;
+	new OP = (msg[0] & 0b00001111) >> 0;
+	new MASK = (msg[1] & 0b10000000) >> 7;
+	new LEN = (msg[1] & 0b01111111) >> 0;
+	new PAYLOAD = 2;
+	if(LEN < 126) {
+		PrintToServer("## FIN=%u OP=%u MASK=%u LEN=%u PAYLOAD=%s", FIN, OP, MASK, LEN, msg[PAYLOAD]);
+
+		switch(OP)
+		{
+			case 1: {
+				handleEngineIO(socket, msg[PAYLOAD]);
+			}
+
+			case 8: {
+				PrintToServer("## Remote HUB closed connection");
+				SocketDisconnect(socket);
+			}
+
+			default: {
+				PrintToServer("## Unknown websocket operation %d", OP);
+			}
+		}
+	} else {
+		PrintToServer("## Unsupported message length");
+	}
+}
+
+public handleEngineIO(Handle:socket, String:msg[]) {
+
+	new String:packet[512];
+	new Handle:json = INVALID_HANDLE;
+
+	switch(msg[0]) {
+
+		// open
+		case '0': {
+
+			// Get SID
+			json = DecodeJSON(msg[1]);
+
+			JSONGetString(json, "sid", sid, sizeof(sid));
+			JSONGetInteger(json, "pingInterval", pingInterval);
+			JSONGetInteger(json, "pingTimeout", pingTimeout);
+			DestroyJSON(json);
+
+			PrintToServer("## Connection SID: %s", sid);
+			PrintToServer("## Ping interval: %d", pingInterval);
+			PrintToServer("## Ping timeout: %d", pingTimeout);
+
+			if(pingTimer != INVALID_HANDLE) {
+				KillTimer(pingTimer);
+				pingTimer = INVALID_HANDLE;
+			}
+			pingTimer = CreateTimer(pingInterval/1000.0, PingTimerCallback, _, TIMER_REPEAT);
+
+			// Upgrade connection
+			Format(packet, sizeof(packet), "GET /%s%s HTTP/1.1\r\nHost: %s\r\nConnection: Upgrade\r\nUpgrade: WebSocket\r\nOrigin: http://hub.motdgd.com/\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: %s\r\n\r\n", "socket.io/?EIO=3&transport=websocket&sid=", sid, "hub.motdgd.com:", "YW4gc3JjZHMgd3MgdGVzdA==");
+			SocketSend(socket, packet);
+		}
+
+		// ping
+		case '2': {
+			if(strcmp(msg[1], "probe")==0) {
+				sendRawMessage(socket, "3probe");
+			} else {
+				PrintToServer("Unexpected message %s", msg[1]);
+			}
+		}
+
+		// pong
+		case '3': {
+			if(strcmp(msg[1], "probe")==0) {
+
+				if(hubState == k_Connected) {
+
+					// Finish switching protocol
+					sendRawMessage(socket, "5");
+					hubState = k_Upgraded;
+
+					// Log in to HUB
+					Format(packet, sizeof(packet), "42[\"login\", %d, \"%s\", \%d, \"\", \"motdgd\", \"%s\", \"%s\"]", GetConVarInt(g_motdID), g_serverIP, g_serverPort, PLUGIN_VERSION, gameDir);
+					sendRawMessage(socket, packet);
+				}
+			} else if(hubState == k_LoggedIn) {
+
+				PrintToServer("## Heartbeat received");
+				if(timeoutTimer != INVALID_HANDLE) {
+					KillTimer(timeoutTimer);
+					timeoutTimer = INVALID_HANDLE;
+				}
+			} else {
+				PrintToServer("Unexpected message %s", msg[1]);
+			}
+		}
+
+		// message
+		case '4': {
+
+			handleSocketIO(socket, msg[1]);
+		}
+
+		default: {
+			PrintToServer("Unexpected engine.io operation %d", msg[0]);
+		}
+	}
+}
+
+public handleSocketIO(Handle:socket, String:msg[]) {
+
+	new client = -1;
+	new String:event[32];
+	new String:player[64];
+	new Handle:json = INVALID_HANDLE;
+
+	switch(msg[0]) {
+
+		// event
+		case '2': {
+
+			json = DecodeArray(msg[1]);
+			JSONGetArrayString(json, 0, event, sizeof(event));
+			if(GetArraySize(json) > 1) {
+				if(strcmp(event, "login_response")==0) {
+					JSONGetArrayInteger(json, 1, ServerID);
+					hubState = k_LoggedIn;
+
+					new String:motdfile[64];
+					new String:url[256];
+					Format(STRING(url), "http://motd.motdgd.com/?user=%d&ip=%s&pt=%d&v=%s&gm=%s&srv_id=%d", GetConVarInt(g_motdID), g_serverIP, g_serverPort, PLUGIN_VERSION, gameDir, ServerID);
+
+					GetConVarString(FindConVar("motdfile"), STRING(motdfile));
+					new Handle:motdtxt = OpenFile(motdfile, "w+");
+					WriteFileString(motdtxt, url, false);
+					CloseHandle(motdtxt);
+
+					PrintToServer("## Connected to the HUB with ID %d", ServerID);
+				} else if(strcmp(event, "aderror_response")==0) {
+
+					JSONGetArrayString(json, 1, player, sizeof(player));
+					PrintToServer("## No ad found for %s", player);
+
+					client = GetClientByIP(player);
+					if(client <= 0) client = GetClientBySteamID(player);
+					if(client > 0) {
+						if(GetConVarInt(g_RewardNoAd) == 1) {
+							RewardPlayer(client);
+						} else {
+							NoRewardPlayer(client);
+						}
+					}
+
+				} else if(strcmp(event, "complete_response")==0) {
+
+					JSONGetArrayString(json, 1, player, sizeof(player));
+					PrintToServer("## Ad finished for %s", player);
+
+					client = GetClientByIP(player);
+					if(client <= 0) client = GetClientBySteamID(player);
+					if(client > 0) {
+						RewardPlayer(client);
+					}
+
+				} else {
+
+					PrintToServer("Unexpected HUB event %s", event);
+				}
+			} else {
+				PrintToServer("Empty HUB event %s", event);
+			}
+
+			
+
+			DestroyJSONArray(json);
+		}
+
+		default: {
+			PrintToServer("Unexpected socket.io operation %d", msg[0]);
+		}
+	}
+}
+
+public sendRawMessage(Handle:socket, String:message[]) {
+
+	new String:packet[256];
+	if(strlen(message) < 126) {
+		packet[0] = 1 << 7; // FIN=1
+		packet[0] += 1 << 0; // OP=0x1
+		packet[1] = 1 << 7; // MASK=1
+		packet[1] += strlen(message); //LEN=strlen(message)
+		packet[2] = GetRandomInt(0, 255);
+		packet[3] = GetRandomInt(0, 255);
+		packet[4] = GetRandomInt(0, 255);
+		packet[5] = GetRandomInt(0, 255);
+		for(new i=0;i<strlen(message);++i) {
+			packet[6+i] = message[i] ^ packet[2+i%4];
+		}
+	} else {
+		PrintToServer("## Unsupported message length");
+		return;
+	}
+	SocketSend(socket, packet);
+}
+
+public Action:PingTimerCallback(Handle:timer) {
+
+	if(hubState == k_Closed) {
+		pingTimer = INVALID_HANDLE;
+		return Plugin_Stop;
+	}
+
+	PrintToServer("## Sending heartbeat");
+	sendRawMessage(hub, "2");
+	if(timeoutTimer == INVALID_HANDLE) {
+		timeoutTimer = CreateTimer(pingTimeout/1000.0, PingTimedout);
+	}
+
+	return Plugin_Continue;
+}
+
+public Action:PingTimedout(Handle:timer) {
+
+	SocketDisconnect(hub);
+	timeoutTimer = INVALID_HANDLE;
+	return Plugin_Stop;
+}
+
+public RewardPlayer(client) {
+
+	new mode = GetConVarInt(g_RewardMode);
+	if(mode == 0 || GetArraySize(rewards) == 0) return;
+
+	new time = RoundToCeil((GetConVarFloat(g_Cooldown) * 60 - (GetTime() - g_lastReward[client]))/60);
+	if(time > 0) {
+
+		new String:msg[256];
+		new String:minutes[11];
+		GetConVarString(g_CooldownMsg, STRING(msg));
+		IntToString(time, STRING(minutes));
+		ReplaceString(STRING(msg), "{minutes}", minutes);
+
+		Chat(client, "%s", msg);
+		return;
+	}
+
+	g_lastReward[client] = GetTime();
+
+	if(mode == 1) {
+		for(new i=0;i<GetArraySize(rewards);++i) {
+			GiveReward(client, i);
+		}
+	} else if(mode == 2) {
+		GiveReward(client, GetRandomInt(0, GetArraySize(rewards)-1));
+	} else if(mode == 3) {
+		new rand = GetRandomInt(1, totalWeight);
+		new sum = 0;
+		for(new i=0;i<GetArraySize(rewards);++i) {
+			sum += GetArrayCell(rewardWeights, i);
+			if(rand <= sum) {
+				GiveReward(client, i);
+				break;
+			}
+		}
+	}
+
+	new String:message[256];
+	GetConVarString(g_RewardMsg, STRING(message));
+	ReplacePlaceholders(client, STRING(message));
+	Chat(client, "%s", message);
+}
+
+public NoRewardPlayer(client) {
+
+	new mode = GetConVarInt(g_RewardMode);
+	if(mode == 0 || GetArraySize(rewards) == 0) return;
+
+	new String:message[256];
+	GetConVarString(g_NoRewardMsg, STRING(message));
+	ReplacePlaceholders(client, STRING(message));
+	Chat(client, "%s", message);
+}
+
+public GiveReward(client, idx) {
+
+	new String:command[512];
+	GetArrayString(rewards, idx, STRING(command));
+	
+	new sep = StrContains(command, " ");
+	if(sep > 0) {
+		command[sep] = 0;
+	}
+
+	new Handle:data;
+	if(GetTrieValue(handlers, command, data) == true) {
+		new String:split[16][64];
+		new strings = ExplodeString(command[sep+1], " ", split, sizeof(split[]), sizeof(split[][]));
+
+		Call_StartFunction(ReadPackCell(data), ReadPackFunction(data));
+		Call_PushCell(client);
+		ResetPack(data);
+
+		for(new i=0;i<strings;++i) {
+			Call_PushString(split[i]);
+		}
+
+		Call_Finish();
+	} else {
+		command[sep] = ' ';
+		ReplacePlaceholders(client, STRING(command));
+		InsertServerCommand("%s", command);
+	}
+}
+
+public ReplacePlaceholders(client, String:msg[], maxlen) {
+
+	new String:name[64];
+	new String:steamid[64];
+	new String:communityid[64];
+	new String:userid[11];
+	new String:clientid[11];
+	Format(STRING(name), "\"%N\"", client);
+	GetClientAuthId(client, AuthId_Steam2, steamid[1], sizeof(steamid)-2);
+	steamid[0]='"';
+	steamid[strlen(steamid)]='"';
+	GetClientAuthId(client, AuthId_SteamID64, STRING(steamid));
+	IntToString(client, STRING(clientid));
+	IntToString(GetClientUserId(client), STRING(userid));
+	ReplaceString(msg, maxlen, "{name}", name);
+	ReplaceString(msg, maxlen, "{steamid}", steamid);
+	ReplaceString(msg, maxlen, "{steamid64}", communityid);
+	ReplaceString(msg, maxlen, "{userid}", userid);
+	ReplaceString(msg, maxlen, "{client}", clientid);
+}

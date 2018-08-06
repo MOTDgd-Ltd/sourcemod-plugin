@@ -279,16 +279,14 @@ public SQLCallback_NoError(Handle:owner, Handle:hndl, const String:error[], any:
 stock GetClientBySteamID(String:steamid[])
 {
 	new String:authid[32];
-	new String:legacy[32];
 	for(new i=1;i<=MaxClients;++i)
 	{
 		if(!IsClientInGame(i))
 			continue;
 		if(!IsClientAuthorized(i))
 			continue;
-		GetClientAuthString(i, STRING(authid));
-		GetClientAuthString(i, STRING(legacy));
-		if(strcmp(legacy[8], steamid[8])==0 || strcmp(authid, steamid)==0)
+		GetClientAuthId(i, AuthId_Steam2, STRING(authid));
+		if(strcmp(authid, steamid)==0)
 			return i;
 	}
 	return 0;
