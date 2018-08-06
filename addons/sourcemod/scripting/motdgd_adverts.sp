@@ -889,8 +889,8 @@ public handleWebsocket(Handle:socket, String:msg[]) {
 
 			case 8: {
 				PrintToServer("## Remote HUB closed connection");
-				CloseHandle(socket);
-				socket = INVALID_HANDLE;
+				CloseHandle(hub);
+				hub = INVALID_HANDLE;
 			}
 
 			default: {
@@ -1096,7 +1096,9 @@ public Action:PingTimerCallback(Handle:timer) {
 
 public Action:PingTimedout(Handle:timer) {
 
-	SocketDisconnect(hub);
+	PrintToServer("## Remote HUB timed out");
+	CloseHandle(hub);
+	hub = INVALID_HANDLE;
 	timeoutTimer = INVALID_HANDLE;
 	return Plugin_Stop;
 }
