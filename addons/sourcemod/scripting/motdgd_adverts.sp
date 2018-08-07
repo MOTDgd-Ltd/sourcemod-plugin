@@ -70,8 +70,9 @@ new bool:g_playerMidgame[MAXPLAYERS+1];
 enum HUBState {
 	k_Closed = 0,
 	k_Connected = 1,
-	k_Upgraded = 2,
-	k_LoggedIn = 3
+	k_Upgrading = 2,
+	k_Upgraded = 3,
+	k_LoggedIn = 4
 }
 
 new Handle:hub = INVALID_HANDLE;
@@ -174,6 +175,7 @@ public OnPluginStart()
 	rewards = CreateArray(512);
 	rewardWeights = CreateArray();
 	RegServerCmd("sm_motdgd_add_reward", Command_AddReward);
+	RegServerCmd("sm_motdgd_hub", Command_Hub);
 	RegConsoleCmd("sm_ad", Command_Ad);
 
 	// MOTDgd MOTD Stuff //
@@ -377,7 +379,7 @@ public OnMapStart() {
 public Action:Command_AddReward(args) {
 
 	if(args < 1) {
-		PrintToServer("Usage: sm_motdgd_add_reward <command> [weight]");
+		LogMessage("Usage: sm_motdgd_add_reward <command> [weight]");
 		return Plugin_Handled;
 	}
 
@@ -394,6 +396,23 @@ public Action:Command_AddReward(args) {
 	GetCmdArg(1, command, sizeof(command));
 	TrimString(command);
 	PushArrayString(rewards, command);
+
+	return Plugin_Handled;
+}
+
+public Action:Command_Hub(args) {
+
+	new String:status[][] = {
+		"socket closed",
+		"socket open",
+		"upgrading transport",
+		"transport upgraded",
+		"logged in"
+	};
+	PrintToServer("MOTDgd HUB status: %s", status[hubState]);
+	if(hubState == k_LoggedIn) {
+		PrintToServer("Server ID: %d", ServerID);
+	}
 
 	return Plugin_Handled;
 }
@@ -819,7 +838,7 @@ public OnSocketConnected(Handle:socket, any:arg) {
 	hubState = k_Connected;
 
 	// socket is connected, send the http request
-	PrintToServer("## Socket connected");
+	LogMessage("## Socket connected");
 	decl String:requestStr[512];
     
 	new String:cb[128];
@@ -829,12 +848,12 @@ public OnSocketConnected(Handle:socket, any:arg) {
 }
 
 public OnSocketError(Handle s, int errorType, int errorNum, any arg) {
-	PrintToServer("## Socket error: %d %d", errorType, errorNum);
+	LogMessage("## Socket error: %d %d", errorType, errorNum);
 }
 
 public OnSocketDisconnected(Handle s, any data) {
 
-	PrintToServer("## Socket disconnected.");
+	LogMessage("## Socket disconnected.");
 	hub = INVALID_HANDLE;
 	hubState = k_Closed;
 	if(pingTimer != INVALID_HANDLE) {
@@ -853,7 +872,7 @@ public OnSocketDisconnected(Handle s, any data) {
 
 public OnSocketReceive(Handle:socket, String:receiveData[], const dataSize, any:hFile)
 {
-	PrintToServer("### received packet length %d", dataSize);
+	LogMessage("### received packet length %d", dataSize);
 	if(hubState == k_Connected && StrContains(receiveData, "HTTP/1.1 200 OK", true) != -1)
 	{
 		new body = StrContains(receiveData, "\r\n\r\n")+4;
@@ -866,15 +885,16 @@ public OnSocketReceive(Handle:socket, String:receiveData[], const dataSize, any:
 	}
 	else if(hubState == k_Connected && StrContains(receiveData, "HTTP/1.1 101 Switching Protocols", true) == 0)
 	{
-		PrintToServer("## Started switching protocols");
+		LogMessage("## Started switching protocols");
+		hubState = k_Upgrading;
 		sendRawMessage(socket, "2probe");
 
-	} else if(hubState == k_Upgraded) {
+	} else if(hubState >= k_Upgrading) {
 
 		handleWebsocket(socket, receiveData);
-	} else if(hubState < k_LoggedIn) {
+	} else if(hubState < k_Upgrading) {
 
-		PrintToServer("## Couldn't connect to HUB, retrying...");
+		LogMessage("## Couldn't connect to HUB, retrying...");
 		CloseHandle(hub);
 		hub = INVALID_HANDLE;
 		OnSocketDisconnected(hub, false);
@@ -889,7 +909,7 @@ public handleWebsocket(Handle:socket, String:msg[]) {
 	new LEN = (msg[1] & 0b01111111) >> 0;
 	new PAYLOAD = 2;
 	if(LEN < 126) {
-		PrintToServer("## FIN=%u OP=%u MASK=%u LEN=%u PAYLOAD=%s", FIN, OP, MASK, LEN, msg[PAYLOAD]);
+		LogMessage("## FIN=%u OP=%u MASK=%u LEN=%u PAYLOAD=%s", FIN, OP, MASK, LEN, msg[PAYLOAD]);
 
 		switch(OP)
 		{
@@ -898,23 +918,23 @@ public handleWebsocket(Handle:socket, String:msg[]) {
 			}
 
 			case 8: {
-				PrintToServer("## Remote HUB closed connection");
+				LogMessage("## Remote HUB closed connection");
 				CloseHandle(hub);
 				hub = INVALID_HANDLE;
 				OnSocketDisconnected(hub, false);
 			}
 
 			case 9: {
-				PrintToServer("## Websocket ping received");
+				LogMessage("## Websocket ping received");
 				sendRawMessage(socket, "", 10);
 			}
 
 			default: {
-				PrintToServer("## Unknown websocket operation %d", OP);
+				LogMessage("## Unknown websocket operation %d", OP);
 			}
 		}
 	} else {
-		PrintToServer("## Unsupported message length");
+		LogMessage("## Unsupported message length");
 	}
 }
 
@@ -936,9 +956,9 @@ public handleEngineIO(Handle:socket, String:msg[]) {
 			JSONGetInteger(json, "pingTimeout", pingTimeout);
 			DestroyJSON(json);
 
-			PrintToServer("## Connection SID: %s", sid);
-			PrintToServer("## Ping interval: %d", pingInterval);
-			PrintToServer("## Ping timeout: %d", pingTimeout);
+			LogMessage("## Connection SID: %s", sid);
+			LogMessage("## Ping interval: %d", pingInterval);
+			LogMessage("## Ping timeout: %d", pingTimeout);
 
 			if(pingTimer != INVALID_HANDLE) {
 				KillTimer(pingTimer);
@@ -956,7 +976,7 @@ public handleEngineIO(Handle:socket, String:msg[]) {
 			if(strcmp(msg[1], "probe")==0) {
 				sendRawMessage(socket, "3probe");
 			} else {
-				PrintToServer("Unexpected message %s", msg[1]);
+				LogMessage("Unexpected message %s", msg[1]);
 			}
 		}
 
@@ -964,7 +984,7 @@ public handleEngineIO(Handle:socket, String:msg[]) {
 		case '3': {
 			if(strcmp(msg[1], "probe")==0) {
 
-				if(hubState == k_Connected) {
+				if(hubState == k_Upgrading) {
 
 					// Finish switching protocol
 					sendRawMessage(socket, "5");
@@ -976,13 +996,13 @@ public handleEngineIO(Handle:socket, String:msg[]) {
 				}
 			} else if(hubState == k_LoggedIn) {
 
-				PrintToServer("## Heartbeat received");
+				LogMessage("## Heartbeat received");
 				if(timeoutTimer != INVALID_HANDLE) {
 					KillTimer(timeoutTimer);
 					timeoutTimer = INVALID_HANDLE;
 				}
 			} else {
-				PrintToServer("Unexpected message %s", msg[1]);
+				LogMessage("Unexpected message %s", msg[1]);
 			}
 		}
 
@@ -993,7 +1013,7 @@ public handleEngineIO(Handle:socket, String:msg[]) {
 		}
 
 		default: {
-			PrintToServer("Unexpected engine.io operation %d", msg[0]);
+			LogMessage("Unexpected engine.io operation %d", msg[0]);
 		}
 	}
 }
@@ -1027,11 +1047,11 @@ public handleSocketIO(Handle:socket, String:msg[]) {
 					WriteFileString(motdtxt, url, false);
 					CloseHandle(motdtxt);
 
-					PrintToServer("## Connected to the HUB with ID %d", ServerID);
+					LogMessage("## Connected to the HUB with ID %d", ServerID);
 				} else if(strcmp(event, "aderror_response")==0) {
 
 					JSONGetArrayString(json, 1, player, sizeof(player));
-					PrintToServer("## No ad found for %s", player);
+					LogMessage("## No ad found for %s", player);
 
 					client = GetClientByIP(player);
 					if(client <= 0) client = GetClientBySteamID(player);
@@ -1046,7 +1066,7 @@ public handleSocketIO(Handle:socket, String:msg[]) {
 				} else if(strcmp(event, "complete_response")==0) {
 
 					JSONGetArrayString(json, 1, player, sizeof(player));
-					PrintToServer("## Ad finished for %s", player);
+					LogMessage("## Ad finished for %s", player);
 
 					client = GetClientByIP(player);
 					if(client <= 0) client = GetClientBySteamID(player);
@@ -1056,10 +1076,10 @@ public handleSocketIO(Handle:socket, String:msg[]) {
 
 				} else {
 
-					PrintToServer("Unexpected HUB event %s", event);
+					LogMessage("Unexpected HUB event %s", event);
 				}
 			} else {
-				PrintToServer("Empty HUB event %s", event);
+				LogMessage("Empty HUB event %s", event);
 			}
 
 			
@@ -1068,7 +1088,7 @@ public handleSocketIO(Handle:socket, String:msg[]) {
 		}
 
 		default: {
-			PrintToServer("Unexpected socket.io operation %d", msg[0]);
+			LogMessage("Unexpected socket.io operation %d", msg[0]);
 		}
 	}
 }
@@ -1090,9 +1110,9 @@ sendRawMessage(Handle:socket, String:message[], op=1) {
 			packet[6+i] = message[i] ^ packet[2+(i%4)];
 		}
 		size = 6 + strlen(message);
-		PrintToServer("### %x - %u", packet[2], packet[6]);
+		LogMessage("### %x - %u", packet[2], packet[6]);
 	} else {
-		PrintToServer("## Unsupported message length");
+		LogMessage("## Unsupported message length");
 		return;
 	}
 	SocketSend(socket, packet, size);
@@ -1105,7 +1125,7 @@ public Action:PingTimerCallback(Handle:timer) {
 		return Plugin_Stop;
 	}
 
-	PrintToServer("## Sending heartbeat");
+	LogMessage("## Sending heartbeat");
 	sendRawMessage(hub, "2");
 	if(timeoutTimer == INVALID_HANDLE) {
 		timeoutTimer = CreateTimer(pingTimeout/1000.0, PingTimedout);
@@ -1116,7 +1136,7 @@ public Action:PingTimerCallback(Handle:timer) {
 
 public Action:PingTimedout(Handle:timer) {
 
-	PrintToServer("## Remote HUB timed out");
+	LogMessage("## Remote HUB timed out");
 	CloseHandle(hub);
 	hub = INVALID_HANDLE;
 	timeoutTimer = INVALID_HANDLE;
