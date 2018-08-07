@@ -88,6 +88,7 @@ new Handle:rewards = INVALID_HANDLE;
 new Handle:rewardWeights = INVALID_HANDLE;
 new totalWeight = 0;
 new shouldReward[MAXPLAYERS+1];
+new Float:reconnectDelay = 0.1;
 
 // ====[ PLUGIN | FORWARDS ]========================================================================
 public Plugin:myinfo =
@@ -846,7 +847,8 @@ public OnSocketDisconnected(Handle s, any data) {
 		timeoutTimer = INVALID_HANDLE;
 	}
 
-	CreateTimer(0.1, connectHub);
+	CreateTimer(reconnectDelay, connectHub);
+	reconnectDelay = reconnectDelay > 55.0 ? 60.0 : reconnectDelay + 5.0;
 }
 
 public OnSocketReceive(Handle:socket, String:receiveData[], const dataSize, any:hFile)
@@ -867,9 +869,15 @@ public OnSocketReceive(Handle:socket, String:receiveData[], const dataSize, any:
 		PrintToServer("## Started switching protocols");
 		sendRawMessage(socket, "2probe");
 
-	} else {
+	} else if(hubState == k_Upgraded) {
 
 		handleWebsocket(socket, receiveData);
+	} else if(hubState < k_LoggedIn) {
+
+		PrintToServer("## Couldn't connect to HUB, retrying...");
+		CloseHandle(hub);
+		hub = INVALID_HANDLE;
+		OnSocketDisconnected(hub, false);
 	}
 }
 
@@ -963,7 +971,7 @@ public handleEngineIO(Handle:socket, String:msg[]) {
 					hubState = k_Upgraded;
 
 					// Log in to HUB
-					Format(packet, sizeof(packet), "42[\"login\", %d, \"%s\", \%d, \"\", \"motdgd\", \"%s\", \"%s\"]", GetConVarInt(g_motdID), g_serverIP, g_serverPort, PLUGIN_VERSION, gameDir);
+					Format(packet, sizeof(packet), "42[\"login\", %d, \"%s\", \%d, \"\", \"motdgd\", \"%s\", \"%s\", %d]", GetConVarInt(g_motdID), g_serverIP, g_serverPort, PLUGIN_VERSION, gameDir, ServerID);
 					sendRawMessage(socket, packet);
 				}
 			} else if(hubState == k_LoggedIn) {
@@ -1008,6 +1016,7 @@ public handleSocketIO(Handle:socket, String:msg[]) {
 				if(strcmp(event, "login_response")==0) {
 					JSONGetArrayInteger(json, 1, ServerID);
 					hubState = k_LoggedIn;
+					reconnectDelay = 0.1;
 
 					new String:motdfile[64];
 					new String:url[256];
