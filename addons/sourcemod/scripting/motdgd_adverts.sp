@@ -832,6 +832,7 @@ public OnSocketError(Handle s, int errorType, int errorNum, any arg) {
 }
 
 public OnSocketDisconnected(Handle s, any data) {
+
 	PrintToServer("## Socket disconnected.");
 	hub = INVALID_HANDLE;
 	hubState = k_Closed;
@@ -850,6 +851,7 @@ public OnSocketDisconnected(Handle s, any data) {
 
 public OnSocketReceive(Handle:socket, String:receiveData[], const dataSize, any:hFile)
 {
+	PrintToServer("### received packet length %d", dataSize);
 	if(hubState == k_Connected && StrContains(receiveData, "HTTP/1.1 200 OK", true) != -1)
 	{
 		new body = StrContains(receiveData, "\r\n\r\n")+4;
@@ -891,6 +893,12 @@ public handleWebsocket(Handle:socket, String:msg[]) {
 				PrintToServer("## Remote HUB closed connection");
 				CloseHandle(hub);
 				hub = INVALID_HANDLE;
+				OnSocketDisconnected(hub, false);
+			}
+
+			case 9: {
+				PrintToServer("## Websocket ping received");
+				sendRawMessage(socket, "", 10);
 			}
 
 			default: {
@@ -1056,12 +1064,13 @@ public handleSocketIO(Handle:socket, String:msg[]) {
 	}
 }
 
-public sendRawMessage(Handle:socket, String:message[]) {
+sendRawMessage(Handle:socket, String:message[], op=1) {
 
 	new String:packet[256];
+	new size = 0;
 	if(strlen(message) < 126) {
 		packet[0] = 1 << 7; // FIN=1
-		packet[0] += 1 << 0; // OP=0x1
+		packet[0] += op << 0; // OP=0x1
 		packet[1] = 1 << 7; // MASK=1
 		packet[1] += strlen(message); //LEN=strlen(message)
 		packet[2] = GetRandomInt(0, 255);
@@ -1069,13 +1078,15 @@ public sendRawMessage(Handle:socket, String:message[]) {
 		packet[4] = GetRandomInt(0, 255);
 		packet[5] = GetRandomInt(0, 255);
 		for(new i=0;i<strlen(message);++i) {
-			packet[6+i] = message[i] ^ packet[2+i%4];
+			packet[6+i] = message[i] ^ packet[2+(i%4)];
 		}
+		size = 6 + strlen(message);
+		PrintToServer("### %x - %u", packet[2], packet[6]);
 	} else {
 		PrintToServer("## Unsupported message length");
 		return;
 	}
-	SocketSend(socket, packet);
+	SocketSend(socket, packet, size);
 }
 
 public Action:PingTimerCallback(Handle:timer) {
@@ -1100,6 +1111,7 @@ public Action:PingTimedout(Handle:timer) {
 	CloseHandle(hub);
 	hub = INVALID_HANDLE;
 	timeoutTimer = INVALID_HANDLE;
+	OnSocketDisconnected(hub, false);
 	return Plugin_Stop;
 }
 
