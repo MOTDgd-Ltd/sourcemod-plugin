@@ -51,6 +51,8 @@ new Handle:g_RewardChance;
 new Handle:g_Cooldown;
 new Handle:g_CooldownMsg;
 new Handle:g_RewardEvents;
+new Handle:g_Reminder;
+new Handle:g_ReminderMsg;
 
 new String:gameDir[255];
 new String:g_serverIP[16];
@@ -166,6 +168,8 @@ public OnPluginStart()
 	g_RewardMsg = CreateConVar("sm_motdgd_reward_message", "Thanks for supporting us! Here's your reward!", "Message to be displayed when an ad was shown");
 	g_NoVideoMsg = CreateConVar("sm_motdgd_no_video_message", "Sorry, no video was available. Try again later!", "Message to be displayed when no ad was shown");
 	g_NoRewardMsg = CreateConVar("sm_motdgd_no_reward_message", "There's no reward for you this time, try again later!", "Message to be displayed when no reward was given");
+	g_ReminderMsg = CreateConVar("sm_motdgd_reminder_message", "Don't forget to watch an ad for a reward! Tyepe /ad in chat!", "Message to remind users about rewards");
+	g_Reminder = CreateConVar("sm_motdgd_reminder", "2.0", "Time (in minutes) between the reminders. 0 = disabled");
 	g_Cooldown = CreateConVar("sm_motdgd_cooldown", "1.0", "Minimum time (in minutes) between rewards.");
 	g_CooldownMsg = CreateConVar("sm_motdgd_cooldown_message", "You have to wait another {minutes} minute(s) before you can receive another reward.", "Message to be displayed when no ad was shown");
 	g_RewardEvents = CreateConVar("sm_motdgd_reward_events", "0", "Should event based ads (such as joining the game) be rewarded");
@@ -213,6 +217,19 @@ public OnPluginEnd() {
 
 public OnConfigsExecuted() {
 	GetIP();
+	CreateTimer(GetConVarFloat(g_Reminder), ReminderCallback, _, TIMER_REPEAT);
+}
+
+public Action:ReminderCallback(Handle:timer) {
+
+	new mode = GetConVarInt(g_RewardMode);
+	if(mode == 0 || GetArraySize(rewards) == 0) return Plugin_Continue;
+
+	new String:msg[256];
+	GetConVarString(g_ReminderMsg, STRING(msg));
+	ChatAll("%s", msg);
+
+	return Plugin_Continue;
 }
 
 public OnLibraryAdded(const String:name[]) {
@@ -379,7 +396,7 @@ public OnMapStart() {
 public Action:Command_AddReward(args) {
 
 	if(args < 1) {
-		LogMessage("Usage: sm_motdgd_add_reward <command> [weight]");
+		PrintToServer("Usage: sm_motdgd_add_reward <command> [weight]");
 		return Plugin_Handled;
 	}
 
@@ -872,7 +889,6 @@ public OnSocketDisconnected(Handle s, any data) {
 
 public OnSocketReceive(Handle:socket, String:receiveData[], const dataSize, any:hFile)
 {
-	LogMessage("### received packet length %d", dataSize);
 	if(hubState == k_Connected && StrContains(receiveData, "HTTP/1.1 200 OK", true) != -1)
 	{
 		new body = StrContains(receiveData, "\r\n\r\n")+4;
@@ -909,7 +925,7 @@ public handleWebsocket(Handle:socket, String:msg[]) {
 	new LEN = (msg[1] & 0b01111111) >> 0;
 	new PAYLOAD = 2;
 	if(LEN < 126) {
-		LogMessage("## FIN=%u OP=%u MASK=%u LEN=%u PAYLOAD=%s", FIN, OP, MASK, LEN, msg[PAYLOAD]);
+		//LogMessage("## FIN=%u OP=%u MASK=%u LEN=%u PAYLOAD=%s", FIN, OP, MASK, LEN, msg[PAYLOAD]);
 
 		switch(OP)
 		{
@@ -996,7 +1012,7 @@ public handleEngineIO(Handle:socket, String:msg[]) {
 				}
 			} else if(hubState == k_LoggedIn) {
 
-				LogMessage("## Heartbeat received");
+				//LogMessage("## Heartbeat received");
 				if(timeoutTimer != INVALID_HANDLE) {
 					KillTimer(timeoutTimer);
 					timeoutTimer = INVALID_HANDLE;
@@ -1051,7 +1067,7 @@ public handleSocketIO(Handle:socket, String:msg[]) {
 				} else if(strcmp(event, "aderror_response")==0) {
 
 					JSONGetArrayString(json, 1, player, sizeof(player));
-					LogMessage("## No ad found for %s", player);
+					//LogMessage("## No ad found for %s", player);
 
 					client = GetClientByIP(player);
 					if(client <= 0) client = GetClientBySteamID(player);
@@ -1066,7 +1082,7 @@ public handleSocketIO(Handle:socket, String:msg[]) {
 				} else if(strcmp(event, "complete_response")==0) {
 
 					JSONGetArrayString(json, 1, player, sizeof(player));
-					LogMessage("## Ad finished for %s", player);
+					//LogMessage("## Ad finished for %s", player);
 
 					client = GetClientByIP(player);
 					if(client <= 0) client = GetClientBySteamID(player);
@@ -1110,7 +1126,7 @@ sendRawMessage(Handle:socket, String:message[], op=1) {
 			packet[6+i] = message[i] ^ packet[2+(i%4)];
 		}
 		size = 6 + strlen(message);
-		LogMessage("### %x - %u", packet[2], packet[6]);
+		//LogMessage("### %x - %u", packet[2], packet[6]);
 	} else {
 		LogMessage("## Unsupported message length");
 		return;
@@ -1125,7 +1141,7 @@ public Action:PingTimerCallback(Handle:timer) {
 		return Plugin_Stop;
 	}
 
-	LogMessage("## Sending heartbeat");
+	//LogMessage("## Sending heartbeat");
 	sendRawMessage(hub, "2");
 	if(timeoutTimer == INVALID_HANDLE) {
 		timeoutTimer = CreateTimer(pingTimeout/1000.0, PingTimedout);
