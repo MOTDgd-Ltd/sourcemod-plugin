@@ -30,7 +30,7 @@
 
 #define STRING(%1) %1, sizeof(%1)
 
-#define PLUGIN_VERSION "3.0.0"
+#define PLUGIN_VERSION "3.0.1"
  
 // ====[ HANDLES | CVARS | VARIABLES ]===================================================
 new Handle:g_motdID;
@@ -391,6 +391,9 @@ public OnMapStart() {
 	if(DisableMOTD != INVALID_HANDLE)
 		SetConVarBool(DisableMOTD, false);
 	LoadWhitelist();
+
+	ClearArray(rewards);
+	ClearArray(rewardWeights);
 }
 
 public Action:Command_AddReward(args) {
