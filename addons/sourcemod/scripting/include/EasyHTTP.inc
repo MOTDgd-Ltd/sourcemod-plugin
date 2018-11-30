@@ -7,14 +7,16 @@
 #undef REQUIRE_EXTENSIONS
 #endif
 
-#include <curl>
+#tryinclude <curl>
 #include <socket>
 #include <steamtools>
 #include <SteamWorks>
 
 #if !defined _easyrcon_included
 new bool:g_bExtensions = false;
+#if defined _cURL_included
 new bool:g_bCURL = false;
+#endif
 new bool:g_bSteamTools = false;
 new bool:g_bSockets = false;
 new bool:g_bSteamWorks = false;
@@ -38,7 +40,9 @@ stock EasyHTTPCheckExtensions()
 {
 	g_bExtensions = true;
 	g_bSockets = (GetExtensionFileStatus("socket.ext")==1?true:false);
+#if defined _cURL_included
 	g_bCURL = (GetExtensionFileStatus("curl.ext")==1?true:false);
+#endif
 	g_bSteamTools = (GetExtensionFileStatus("steamtools.ext")==1?true:false);
 	g_bSteamWorks = (GetExtensionFileStatus("SteamWorks.ext")==1?true:false);
 }
@@ -102,6 +106,7 @@ stock bool:EasyHTTP(const String:url[], EHTTPMethodInternal:method, Handle:param
 	else
 		strcopy(m_szURLNew, m_unURLSize, url);
 
+#if defined _cURL_included
 	if(g_bCURL)
 	{
 		new Handle:m_hCurl = curl_easy_init();
@@ -162,7 +167,12 @@ stock bool:EasyHTTP(const String:url[], EHTTPMethodInternal:method, Handle:param
 	
 			return true;
 		}
-	} else if(g_bSteamTools || g_bSteamWorks)
+	}
+	else if(g_bSteamTools || g_bSteamWorks)
+#endif
+#if !defined _cURL_included
+	if (g_bSteamTools || g_bSteamWorks)
+#endif
 	{
 		new Handle:m_hData = CreateDataPack();
 		WritePackFunction(m_hData, complete);
@@ -341,7 +351,7 @@ public EasyHTTP_CurlWrite(Handle:hndl, const String:buffer[], const bytes, const
 	}
 	return bytes*nmemb;
 }
-
+#if defined _cURL_included
 public EasyHTTP_CurlComplete(Handle:hndl, CURLcode:code, any:data)
 {
 	CloseHandle(hndl);
@@ -355,7 +365,7 @@ public EasyHTTP_CurlComplete(Handle:hndl, CURLcode:code, any:data)
 	new Handle:m_hData = Handle:ReadPackCell(Handle:data);
 	CloseHandle(data);
 
-	if(code != CURLE_OK)
+	if (code != CURLE_OK)
 	{
 		new String:err[256];
 		curl_get_error_buffer(hndl, err, sizeof(err));
@@ -370,7 +380,6 @@ public EasyHTTP_CurlComplete(Handle:hndl, CURLcode:code, any:data)
 		}
 		return;
 	}
-
 
 	if(m_fnCallback != INVALID_FUNCTION)
 	{
@@ -402,6 +411,7 @@ public EasyHTTP_CurlComplete(Handle:hndl, CURLcode:code, any:data)
 	}
 	CloseHandle(m_hData);
 }
+#endif
 
 public EasyHTTP_SteamWorksComplete(Handle:request, bool:failure, bool:successful, EHTTPStatusCode:code, any:data)
 {
