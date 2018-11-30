@@ -551,7 +551,7 @@ public EasyHTTP_SocketReceive(Handle:socket, String:receiveData[], const dataSiz
 	ReadPackString(Handle:data, STRING(m_szPath));
 	new bool:m_bFile = (m_szPath[0]?true:false);
 	new Handle:m_hData = Handle:ReadPackCell(Handle:data);
-	new m_iHeaders = GetPackPosition(Handle:data);
+	new m_iHeaders = _:GetPackPosition(Handle:data);
 	new bool:m_bHeaders = bool:ReadPackCell(Handle:data);
 	ResetPack(data);
 
@@ -563,7 +563,7 @@ public EasyHTTP_SocketReceive(Handle:socket, String:receiveData[], const dataSiz
 		else
 		{
 			m_iPos += 4;
-			SetPackPosition(Handle:data, m_iHeaders);
+			SetPackPosition(Handle:data, DataPackPos:m_iHeaders);
 			WritePackCell(Handle:data, true);
 			ResetPack(data);
 		}
