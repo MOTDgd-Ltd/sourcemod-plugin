@@ -93,6 +93,7 @@ Handle rewards = INVALID_HANDLE;
 Handle rewardWeights = INVALID_HANDLE;
 int totalWeight = 0;
 int shouldReward[MAXPLAYERS+1];
+int g_bClientDisabledMotd[MAXPLAYERS + 1];
 float reconnectDelay = 0.1;
 
 // ====[ PLUGIN | FORWARDS ]========================================================================
@@ -420,7 +421,6 @@ static const char status[][] =
 	
 public Action Command_Hub(int args)
 {
-
 	PrintToServer("MOTDgd HUB status: %s", status[hubState]);
 	if (hubState == k_LoggedIn)
 	{
@@ -433,7 +433,11 @@ public Action Command_Hub(int args)
 public Action Command_Ad(int client, int args)
 {
 	if (client <= 0) return Plugin_Continue;
-
+	
+	// Check to make sure the client hasn't blocked html motd. There is no point processing this command for them.
+	// But, this response can encourage them to turn html motd on in order to use the reward system.
+	QueryClientConVar(client, "cl_disablehtmlmotd", ConVar_DisableHtmlMotd);
+			
 	shouldReward[client] = GetTime();
 
 	int time1 = !CanReview ? 0 : RoundToCeil((GetConVarFloat(g_Review) * 60 - (GetTime() - g_lastView[client]))/60);
@@ -443,9 +447,16 @@ public Action Command_Ad(int client, int args)
 	{
 		if (!g_bCSGO)
 		{
-			g_lastView[client] = GetTime();
-			g_playerMidgame[client] = true;
-			CreateTimer(0.1, PreMotdTimer, GetClientUserId(client));
+			if (!g_bClientDisabledMotd[client]) 
+			{
+				g_lastView[client] = GetTime();
+				g_playerMidgame[client] = true;
+				CreateTimer(0.1, PreMotdTimer, GetClientUserId(client));
+			}
+			else
+			{
+				Chat(client, "You must set 'cl_disablehtmlmotd' to '0' in order to use this command!");
+			}
 		}
 		else
 		{
@@ -464,6 +475,22 @@ public Action Command_Ad(int client, int args)
 	}
 
 	return Plugin_Handled;
+}
+
+public void ConVar_DisableHtmlMotd(QueryCookie hCookie, int iClient, ConVarQueryResult cvResult, const char[] sCvarName, const char[] sCvarValue)
+{
+	if (cvResult == ConVarQuery_Okay)
+	{
+		int iValue = StringToInt(sCvarValue);
+		if (iValue == 0)
+		{
+			g_bClientDisabledMotd[iClient] = false;
+		}
+		else
+		{
+			g_bClientDisabledMotd[iClient] = true;
+		}
+	}
 }
 
 // ====[ FUNCTIONS ]=====================================================================
@@ -591,17 +618,14 @@ public Action OnVGUIMenu(UserMsg msg_id, Handle bf, const int[] players, int pla
 	if (!(playersNum > 0))
 		return Plugin_Handled;
 	int client = players[0];
-	
+		
 	if (playersNum > 1 || !IsValidClient(client) || VGUICaught[client] || !GetConVarBool(g_OnConnect))
 		return Plugin_Continue;
 
 	VGUICaught[client] = true;
-	
 	g_lastView[client] = GetTime();
-	
-	g_playerMidgame[client]=false;
+	g_playerMidgame[client] = false;
 	CreateTimer(0.1, PreMotdTimer, GetClientUserId(client));
-	
 	return Plugin_Handled;
 }
 
@@ -646,6 +670,11 @@ public Action PreMotdTimer(Handle timer, any userid)
 		return Plugin_Stop;
 
 	if (!IsValidClient(client))
+		return Plugin_Stop;
+		
+	// Don't bother with clients that have disabled html motd.
+	if (!g_bCSGO) QueryClientConVar(client, "cl_disablehtmlmotd", ConVar_DisableHtmlMotd);
+	if (g_bClientDisabledMotd[client])
 		return Plugin_Stop;
 	
 	char url[255];
