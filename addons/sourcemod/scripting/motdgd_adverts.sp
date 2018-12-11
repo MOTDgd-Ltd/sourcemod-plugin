@@ -95,6 +95,7 @@ int totalWeight = 0;
 int shouldReward[MAXPLAYERS+1];
 int g_bClientDisabledMotd[MAXPLAYERS + 1];
 float reconnectDelay = 0.1;
+Handle g_RemindTimer = INVALID_HANDLE;
 
 // ====[ PLUGIN | FORWARDS ]========================================================================
 public const Plugin myinfo =
@@ -182,7 +183,7 @@ public void OnPluginStart()
 	g_NoVideoMsg = CreateConVar("sm_motdgd_no_video_message", "Sorry, no video was available. Try again later!", "Message to be displayed when no ad was shown");
 	g_NoRewardMsg = CreateConVar("sm_motdgd_no_reward_message", "There's no reward for you this time, try again later!", "Message to be displayed when no reward was given");
 	g_ReminderMsg = CreateConVar("sm_motdgd_reminder_message", "Don't forget to watch an ad for a reward! Type /ad in chat!", "Message to remind users about rewards");
-	g_Reminder = CreateConVar("sm_motdgd_reminder", "300.0", "Time (in minutes) between the reminders. 0 = disabled");
+	g_Reminder = CreateConVar("sm_motdgd_reminder", "5.0", "Time (in minutes) between the reminders. 0 = disabled");
 	g_Cooldown = CreateConVar("sm_motdgd_cooldown", "1.0", "Minimum time (in minutes) between rewards.");
 	g_CooldownMsg = CreateConVar("sm_motdgd_cooldown_message", "You have to wait another {minutes} minute(s) before you can receive another reward.", "Message to be displayed when no ad was shown");
 	g_RewardEvents = CreateConVar("sm_motdgd_reward_events", "0", "Should event based ads (such as joining the game) be rewarded");
@@ -233,7 +234,10 @@ public void OnPluginEnd()
 public void OnConfigsExecuted()
 {
 	GetIP();
-	CreateTimer(GetConVarFloat(g_Reminder), ReminderCallback, _, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
+	if(g_RemindTimer != INVALID_HANDLE) {
+		KillTimer(g_RemindTimer);
+	}
+	g_RemindTimer = CreateTimer(GetConVarFloat(g_Reminder)*60, ReminderCallback, _, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
 }
 
 public Action ReminderCallback(Handle hTimer) 
