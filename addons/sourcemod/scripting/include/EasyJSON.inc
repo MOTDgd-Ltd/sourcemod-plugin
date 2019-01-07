@@ -753,6 +753,9 @@ stock bool:GetJSONString(const String:json[], &start, &end)
 	if(json[m_iPos] == '"')
 		++m_iPos;
 	start = m_iPos;
+	if(m_iPos-1 < 0) {
+		return false;
+	}
 	if(json[m_iPos-1] == '"')
 	{
 		while((m_iCharPos = FindCharInString(json[m_iPos], '"')) != -1)
