@@ -177,9 +177,10 @@ stock Handle:DecodeArray(const String:json[], &len=0)
 			}
 		} else if(GetJSONString(json[m_iPos], m_iStringStart, m_iStringEnd))
 		{
+
 			new String:m_szValue[m_iStringEnd-m_iStringStart+1];
 			strcopy(m_szValue, m_iStringEnd-m_iStringStart+1, json[m_iPos+m_iStringStart]);
-
+			//PrintToServer("m_iStringStart%i, m_iStringEnd%i, m_szValue%s%", m_iStringStart, m_iStringEnd, m_szValue);
 			if(json[m_iPos+m_iStringEnd]==']')
 				m_bEnd = true;
 			m_iPos += m_iStringEnd+1;
@@ -750,14 +751,11 @@ stock bool:GetJSONString(const String:json[], &start, &end)
 	decl m_iCharPos;
 
 	new m_iPos = JSONIgnore(json);
+	start = m_iPos == -1 ? 0 : m_iPos;
 	if(json[m_iPos] == '"')
-		++m_iPos;
-	start = m_iPos;
-	if(m_iPos-1 < 0) {
-		return false;
-	}
-	if(json[m_iPos-1] == '"')
 	{
+		start += 1;
+		m_iPos += 1;
 		while((m_iCharPos = FindCharInString(json[m_iPos], '"')) != -1)
 		{
 			m_iPos += m_iCharPos;
