@@ -31,9 +31,10 @@
 
 #define STRING(%1) %1, sizeof(%1)
 
-#define PLUGIN_VERSION "3.0.1"
+#define PLUGIN_VERSION "3.0.2"
  
 // ====[ HANDLES | CVARS | VARIABLES ]===================================================
+Handle g_serverID;
 Handle g_motdID;
 Handle g_OnConnect;
 Handle g_immunity;
@@ -141,6 +142,7 @@ public void OnPluginStart()
 	
 	// Plugin ConVars //
 	CreateConVar("sm_motdgd_version", PLUGIN_VERSION, "[SM] MOTDgd Plugin Version", FCVAR_DONTRECORD);
+	g_serverID = CreateConVar("sm_motdgd_serverid", "-1", "[SM] MOTDgd Current Server ID", FCVAR_DONTRECORD);
 
 	g_motdID = CreateConVar("sm_motdgd_userid", "0", "MOTDgd User ID. This number can be found at: https://portal.motdgd.com");
 	g_immunity = CreateConVar("sm_motdgd_immunity", "0", "Enable/Disable advert immunity");
@@ -236,8 +238,9 @@ public void OnConfigsExecuted()
 	GetIP();
 	if(g_RemindTimer != INVALID_HANDLE) {
 		KillTimer(g_RemindTimer);
+		g_RemindTimer = INVALID_HANDLE;
 	}
-	g_RemindTimer = CreateTimer(GetConVarFloat(g_Reminder)*60, ReminderCallback, _, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
+	g_RemindTimer = CreateTimer(GetConVarFloat(g_Reminder)*60, ReminderCallback, _, TIMER_REPEAT);
 }
 
 public Action ReminderCallback(Handle hTimer) 
@@ -970,9 +973,9 @@ public void OnSocketReceive(Handle socket, char[] receiveData, const int dataSiz
 
 public void handleWebsocket(Handle socket, char[] msg)
 {
-	int FIN = (msg[0] & 0b10000000) >> 7;
+	//int FIN = (msg[0] & 0b10000000) >> 7;
 	int OP = (msg[0] & 0b00001111) >> 0;
-	int MASK = (msg[1] & 0b10000000) >> 7;
+	//int MASK = (msg[1] & 0b10000000) >> 7;
 	int LEN = (msg[1] & 0b01111111) >> 0;
 	int PAYLOAD = 2;
 	if (LEN < 126)
@@ -1134,6 +1137,17 @@ public void handleSocketIO(Handle socket, char[] msg)
 					Handle motdtxt = OpenFile(motdfile, "w+");
 					WriteFileString(motdtxt, url, false);
 					CloseHandle(motdtxt);
+
+					if (GetConVarInt(g_serverID) == -1)
+					{
+						SetConVarInt(g_serverID, ServerID);
+
+						char currentMap[PLATFORM_MAX_PATH];
+						GetCurrentMap(currentMap, sizeof(currentMap));
+						ForceChangeLevel(currentMap, "Restarting map one-time in order to ensure that the MOTDgd Server ID is in sync with the new MOTD URL");
+
+						return;
+					}
 
 					LogMessage("## Connected to the HUB with ID %d", ServerID);
 				}
