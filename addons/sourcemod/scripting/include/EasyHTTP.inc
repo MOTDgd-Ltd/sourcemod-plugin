@@ -841,7 +841,7 @@ stock EasyHTTP_MarkNatives()
 	MarkNativeAsOptional("curl_httppost");
 	MarkNativeAsOptional("curl_slist");
 	MarkNativeAsOptional("curl_easy_setopt_handle");
-	MarkNativeAsOptional("curl_easy_setopt_functio	n");
+	MarkNativeAsOptional("curl_easy_setopt_function");
 	MarkNativeAsOptional("curl_load_opt");
 	MarkNativeAsOptional("curl_easy_perform");
 	MarkNativeAsOptional("curl_easy_perform_thread");
